@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Podcast 播放器 - 最終完美版</title>
+    <style>
+        :root { --bg-blue: #e0f2fe; --panel-white: #ffffff; }
+        body { margin: 0; padding: 0; overflow: hidden; background-color: var(--bg-blue); font-family: sans-serif; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        
+        /* 背景畫布 */
+        #visualizer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+
+        /* 白色面板 */
+        .player-panel { position: relative; z-index: 10; background: var(--panel-white); width: 400px; padding: 30px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); text-align: center; }
+        
+        .progress-container { margin: 20px 0; }
+        #progress-bar { width: 100%; height: 6px; accent-color: #3b82f6; cursor: pointer; }
+        .time-info { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-top: 5px; }
+
+        .btn-group { display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 25px; }
+        button { background: #f1f5f9; border: none; padding: 15px; border-radius: 50%; cursor: pointer; width: 55px; height: 55px; font-size: 1.2rem; }
+        .play-btn { background: #3b82f6; color: white; }
+
+        .slider-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; color: #475569; }
+        .slider-row label { width: 70px; text-align: left; }
+        .slider-row input { flex: 1; accent-color: #3b82f6; }
+        .value-num { width: 40px; font-weight: bold; }
+
+        /* 鍵盤小提示樣式 */
+        .shortcuts-hint {
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 1px dashed #e2e8f0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 11px;
+            color: #94a3b8;
+            text-align: left;
+        }
+        .hint-item b { color: #64748b; background: #f1f5f9; padding: 2px 4px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<canvas id="visualizer"></canvas>
+
+<div class="player-panel">
+    <h2 style="margin-top:0; color:#1e293b;">Podcast Player</h2>
+
+    <div class="progress-container">
+        <input type="range" id="progress-bar" value="0" min="0" max="100" step="0.1">
+        <div class="time-info">
+            <span id="current-time">0:00</span>
+            <span id="total-duration">0:00</span>
+        </div>
+    </div>
+
+    <div class="btn-group">
+        <button onclick="changeTime(-15)">⏪</button>
+        <button id="play-btn" class="play-btn" onclick="togglePlay()">▶</button>
+        <button onclick="changeTime(15)">⏩</button>
+    </div>
+
+    <div class="slider-row">
+        <label>音量</label>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+        <span class="value-num" id="vol-txt">100</span>
+    </div>
+
+    <div class="slider-row">
+        <label>速度</label>
+        <input type="range" id="speed-slider" min="0.33" max="3" step="0.01" value="1">
+        <span class="value-num" id="speed-txt">1.0</span>
+    </div>
+
+    <div class="shortcuts-hint">
+        <div class="hint-item"><b>Space</b> 播放 / 暫停</div>
+        <div class="hint-item"><b>← / →</b> 前後 15 秒</div>
+        <div class="hint-item"><b>↑ / ↓</b> 調節速度</div>
+        <div class="hint-item">（滑鼠拖曳進度、音量與速度）</div>
+    </div>
+</div>
+
+<audio id="main-audio" crossOrigin="anonymous">
+    <source src="https://raw.githubusercontent.com/u11307007-debug/mp3/main/podcast.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+    const audio = document.getElementById('main-audio');
+    const playBtn = document.getElementById('play-btn');
+    const progressBar = document.getElementById('progress-bar');
+    const volSlider = document.getElementById('volume-slider');
+    const speedSlider = document.getElementById('speed-slider');
+    const canvas = document.getElementById('visualizer');
+    const ctx = canvas.getContext('2d');
+
+    let audioCtx, analyser, dataArray, source;
+
+    function initAudio() {
+        if (audioCtx) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        source = audioCtx.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        analyser.fftSize = 128;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        draw();
+    }
+
+    function togglePlay() {
+        initAudio();
+        if (audio.paused) {
+            audio.play().catch(e => console.error("播放失敗:", e));
+            playBtn.innerText = '⏸';
+        } else {
+            audio.pause();
+            playBtn.innerText = '▶';
+        }
+    }
+
+    function changeTime(sec) { audio.currentTime += sec; }
+
+    audio.ontimeupdate = () => {
+        const percent = (audio.currentTime / audio.duration) * 100;
+        progressBar.value = percent || 0;
+        document.getElementById('current-time').innerText = formatTime(audio.currentTime);
+        document.getElementById('total-duration').innerText = formatTime(audio.duration);
+    };
+
+    progressBar.oninput = () => { audio.currentTime = (progressBar.value / 100) * audio.duration; };
+
+    volSlider.oninput = () => {
+        audio.volume = volSlider.value;
+        document.getElementById('vol-txt').innerText = Math.round(volSlider.value * 100);
+    };
+
+    speedSlider.oninput = () => {
+        const val = parseFloat(speedSlider.value);
+        audio.playbackRate = val;
+        document.getElementById('speed-txt').innerText = val.toFixed(1);
+    };
+
+    // 鍵盤事件監聽
+    window.addEventListener('keydown', (e) => {
+        // 防止空白鍵捲動網頁
+        if(e.key === ' ') {
+            e.preventDefault();
+            togglePlay();
+        }
+        if (e.key === 'ArrowRight') changeTime(15);
+        if (e.key === 'ArrowLeft') changeTime(-15);
+        if (e.key === 'ArrowUp') { 
+            speedSlider.value = Math.min(3, parseFloat(speedSlider.value) + 0.1); 
+            speedSlider.oninput(); 
+        }
+        if (e.key === 'ArrowDown') { 
+            speedSlider.value = Math.max(0.33, parseFloat(speedSlider.value) - 0.1); 
+            speedSlider.oninput(); 
+        }
+    });
+
+    function draw() {
+        requestAnimationFrame(draw);
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const barWidth = (canvas.width / dataArray.length) * 2;
+        let x = 0;
+
+        for (let i = 0; i < dataArray.length; i++) {
+            const barHeight = (dataArray[i] / 255) * canvas.height * 0.7;
+            ctx.fillStyle = `rgba(255, 255, 255, 0.6)`;
+            ctx.fillRect(x, (canvas.height - barHeight) / 2, barWidth - 4, barHeight);
+            x += barWidth;
+        }
+    }
+
+    function formatTime(time) {
+        if (isNaN(time)) return "0:00";
+        const m = Math.floor(time / 60);
+        const s = Math.floor(time % 60);
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+</script>
+
+</body>
+</html>
